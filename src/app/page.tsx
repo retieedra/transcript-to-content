@@ -6,6 +6,7 @@ import { ManifestoHeader } from "@/components/ManifestoHeader";
 import { SpinningManifold } from "@/components/SpinningManifold";
 import { StepDots } from "@/components/StepDots";
 import { saveProfileDraft } from "@/lib/profile-storage";
+import { withBasePath } from "@/lib/appPath";
 import { extractPostsFromXTimelineJson } from "@/lib/xTimelineExtract";
 
 type SourceRow = { url: string; ok: boolean; chars?: number; error?: string };
@@ -73,7 +74,7 @@ export default function Home() {
     }
     setBusy(true);
     try {
-      const res = await fetch("/api/profile-from-samples", {
+      const res = await fetch(withBasePath("/api/profile-from-samples"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ urls, samples }),

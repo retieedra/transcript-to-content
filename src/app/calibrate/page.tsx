@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ManifestoHeader } from "@/components/ManifestoHeader";
 import { StepDots } from "@/components/StepDots";
+import { withBasePath } from "@/lib/appPath";
 import {
   loadCalibration,
   loadProfileDraft,
@@ -83,7 +84,7 @@ export default function CalibratePage() {
       setLoadBusy(true);
       setLoadError(null);
       try {
-        const res = await fetch("/api/generate-examples", {
+        const res = await fetch(withBasePath("/api/generate-examples"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ profile: draft, count: 10 }),
@@ -136,7 +137,7 @@ export default function CalibratePage() {
         text,
         approved: ratings[i] === true,
       }));
-      const res = await fetch("/api/refine-profile", {
+      const res = await fetch(withBasePath("/api/refine-profile"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile, items }),
@@ -160,7 +161,7 @@ export default function CalibratePage() {
     setLoadBusy(true);
     setLoadError(null);
     try {
-      const res = await fetch("/api/generate-examples", {
+      const res = await fetch(withBasePath("/api/generate-examples"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile: p, count: 10 }),
