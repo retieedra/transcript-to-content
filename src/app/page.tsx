@@ -6,12 +6,14 @@ import { ManifestoHeader } from "@/components/ManifestoHeader";
 import { SpinningManifold } from "@/components/SpinningManifold";
 import { StepDots } from "@/components/StepDots";
 import { saveProfileDraft } from "@/lib/profile-storage";
+import { extractPostsFromXTimelineJson } from "@/lib/xTimelineExtract";
 
 type SourceRow = { url: string; ok: boolean; chars?: number; error?: string };
 
 export default function Home() {
   const router = useRouter();
   const [urlsText, setUrlsText] = useState("");
+  const [xTimelineJson, setXTimelineJson] = useState("");
   const [chunks, setChunks] = useState<string[]>([""]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,9 +52,22 @@ export default function Home() {
       .map((l) => l.trim())
       .filter(Boolean);
     const samples = chunks.map((s) => s.trim()).filter(Boolean);
+
+    const xTrim = xTimelineJson.trim();
+    if (xTrim) {
+      const xr = extractPostsFromXTimelineJson(xTrim);
+      if (xr.error) {
+        setError(xr.error);
+        return;
+      }
+      samples.push(
+        `## Posts from pasted X timeline (JSON)\n\n_${xr.tweetCount} posts extracted._\n\n${xr.combined}`,
+      );
+    }
+
     if (urls.length === 0 && samples.length === 0) {
       setError(
-        "Add at least one link, or paste text in the optional box below.",
+        "Add at least one link, paste text below, or paste an X timeline JSON export.",
       );
       return;
     }
@@ -106,7 +121,7 @@ export default function Home() {
         <ManifestoHeader
           graphic={<SpinningManifold />}
           title="Your voice, one file"
-          subtitle="Paste public links to things you have already published. We pull the visible text, draft a tight spec, show you lines to approve or reject, then hand you one file—plain text you own."
+          subtitle="Paste public links to things you have already published. We pull the visible text, draft a tight spec, you finetune with thumbs up or down on sample lines, then you get one file—plain text you own."
         />
 
         <aside className="mt-10 border border-[var(--rule)] bg-[var(--paper-2)] p-4 text-left text-[0.8125rem] leading-relaxed text-[var(--ink-muted)]">
@@ -115,7 +130,7 @@ export default function Home() {
           </p>
           <ul className="mt-2 list-inside list-disc space-y-1">
             <li>A first-pass spec from your links (and any paste).</li>
-            <li>A screen of candidate lines—say which ones match you.</li>
+            <li>A finetune step: sample lines with thumbs up or down.</li>
             <li>One file you can file, edit, or feed to any tool on your terms.</li>
           </ul>
         </aside>
@@ -128,8 +143,11 @@ export default function Home() {
             Put one URL per line: profile pages, pinned posts, blog indexes,
             newsletter archives—anything that is <strong>public</strong> and
             opens without signing in. We fetch the text from each page. Many
-            networks limit bots; if a link fails, use another page or paste an
-            excerpt in step 2.
+            sites allow that; X (Twitter) often does not. For X, use step 2 or
+            the JSON box below it: DevTools → Network, reload a profile, open a{" "}
+            <span className="font-doc-mono">UserTweets</span> request, copy the
+            full Response body—we parse it only in your session and do not call
+            X from our servers.
           </p>
           <textarea
             className="type-input min-h-[120px] w-full resize-y border border-[var(--rule)] bg-[var(--paper)] px-3 py-2.5 text-[0.875rem] leading-relaxed text-[var(--ink)] outline-none ring-0 focus:border-[var(--rule-strong)]"
@@ -199,6 +217,30 @@ export default function Home() {
           >
             + Another block
           </button>
+
+          <div className="mt-8 border-t border-[var(--rule)] pt-6">
+            <h3 className="font-doc-mono text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--ink)]">
+              Optional · X timeline JSON
+            </h3>
+            <p className="mt-2 text-[0.875rem] leading-relaxed text-[var(--ink-muted)]">
+              Paste the raw JSON from a{" "}
+              <span className="font-doc-mono text-[0.8125rem]">UserTweets</span>{" "}
+              (or similar timeline) response. Post text is pulled from{" "}
+              <span className="font-doc-mono text-[0.8125rem]">
+                legacy.full_text
+              </span>
+              , or the long-form note when present. Duplicates are dropped by
+              post id.
+            </p>
+            <textarea
+              value={xTimelineJson}
+              onChange={(e) => setXTimelineJson(e.target.value)}
+              rows={4}
+              placeholder='Paste JSON starting with { "data": … }'
+              className="type-input mt-3 w-full resize-y border border-[var(--rule)] bg-[var(--paper-2)] px-3 py-2.5 font-doc-mono text-[11px] leading-relaxed text-[var(--ink)] outline-none focus:border-[var(--rule-strong)]"
+              spellCheck={false}
+            />
+          </div>
         </section>
 
         {sources?.length ? (

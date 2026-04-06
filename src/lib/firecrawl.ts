@@ -10,6 +10,39 @@ function getBaseUrl(): string {
   return (process.env.FIRECRAWL_API_URL ?? DEFAULT_BASE).replace(/\/$/, "");
 }
 
+/** Logs raw Firecrawl HTTP body per URL (server terminal). Set FIRECRAWL_LOG_MAX=0 for one-line only. */
+function logFirecrawlResponse(
+  url: string,
+  httpStatus: number,
+  rawText: string,
+): void {
+  if (process.env.FIRECRAWL_LOG === "0") return;
+
+  const limitRaw = process.env.FIRECRAWL_LOG_MAX;
+  if (limitRaw === "0") {
+    console.log(
+      `[firecrawl] ${url} → HTTP ${httpStatus}, body ${rawText.length} bytes`,
+    );
+    return;
+  }
+
+  const max = limitRaw
+    ? Math.max(0, parseInt(limitRaw, 10) || 12_000)
+    : 12_000;
+  if (max === 0) {
+    console.log(
+      `[firecrawl] ${url} → HTTP ${httpStatus}, body ${rawText.length} bytes`,
+    );
+    return;
+  }
+
+  const preview =
+    rawText.length > max
+      ? `${rawText.slice(0, max)}\n… [truncated ${rawText.length - max} more bytes; set FIRECRAWL_LOG_MAX for more]`
+      : rawText;
+  console.log(`[firecrawl] ${url} HTTP ${httpStatus} response:\n${preview}`);
+}
+
 function formatFirecrawlError(
   json: Record<string, unknown> | null,
   status: number,
@@ -71,6 +104,7 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
+    console.error(`[firecrawl] ${url} fetch error:`, msg);
     return {
       url,
       markdown: "",
@@ -79,6 +113,8 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
   }
 
   const rawText = await res.text();
+  logFirecrawlResponse(url, res.status, rawText);
+
   let json: Record<string, unknown> | null = null;
   if (rawText) {
     try {

@@ -1,6 +1,6 @@
 "use client";
 
-const steps = ["Collect", "Compare", "Export"] as const;
+const steps = ["Collect", "Finetune", "Export"] as const;
 
 type Props = { active: 0 | 1 | 2 };
 
