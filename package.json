@@ -1,9 +1,9 @@
 {
-  "name": "transcript-to-content",
+  "name": "your-voice-one-file",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
