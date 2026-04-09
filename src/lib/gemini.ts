@@ -116,23 +116,33 @@ export async function chatCompletionPlainText(params: {
   return stripFence(content);
 }
 
-type GeminiPart =
+function parseJsonFromGeminiResponse(raw: GeminiResponse & GeminiErrorBody): unknown {
+  const parts = raw.candidates?.[0]?.content?.parts;
+  const text = parts?.map((p) => p.text ?? "").join("")?.trim() ?? "";
+  if (!text) throw new Error("No JSON came back from the model. Try again.");
+  const cleaned = stripFence(text);
+  try {
+    return JSON.parse(cleaned) as unknown;
+  } catch {
+    throw new Error("The model returned invalid JSON. Try again.");
+  }
+}
+
+export type GeminiPart =
   | { text: string }
   | { inline_data: { mime_type: string; data: string } };
 
-/** Profile draft from optional pasted text plus one or more PDFs (Gemini reads PDFs natively). */
-export async function chatProfileFromPdfsAndText(params: {
+type StructuredParams = {
   system: string;
   userParts: GeminiPart[];
+  responseSchema: Record<string, unknown>;
   temperature?: number;
-}): Promise<string> {
+};
+
+/** Multimodal generateContent with JSON schema output (e.g. evidence extraction from PDFs). */
+export async function generateStructuredFromParts<T>(params: StructuredParams): Promise<T> {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn(
-        "[gemini] GEMINI_API_KEY is not set; add it to .env and restart the dev server.",
-      );
-    }
     throw new Error(
       "The writing step isn’t available on this server right now. Try again later.",
     );
@@ -155,7 +165,9 @@ export async function chatProfileFromPdfsAndText(params: {
         },
       ],
       generationConfig: {
-        temperature: params.temperature ?? 0.35,
+        temperature: params.temperature ?? 0.25,
+        responseMimeType: "application/json",
+        responseSchema: params.responseSchema,
       },
     }),
   });
@@ -201,16 +213,24 @@ export async function chatProfileFromPdfsAndText(params: {
   const block = raw.promptFeedback?.blockReason;
   if (block) {
     throw new Error(
-      "The writing step was blocked for this prompt. Try different PDFs or try again later.",
+      "The writing step was blocked for this prompt. Try different sources or try again later.",
     );
   }
 
-  const parts = raw.candidates?.[0]?.content?.parts;
-  const content =
-    parts?.map((p) => p.text ?? "").join("")?.trim() ?? "";
-  if (!content) {
-    throw new Error("No text came back from the writing step. Try again.");
-  }
+  return parseJsonFromGeminiResponse(raw) as T;
+}
 
-  return stripFence(content);
+/** Text-only structured JSON (e.g. synthesize spec from evidence). */
+export async function chatCompletionJson<T>(params: {
+  system: string;
+  user: string;
+  responseSchema: Record<string, unknown>;
+  temperature?: number;
+}): Promise<T> {
+  return generateStructuredFromParts<T>({
+    system: params.system,
+    userParts: [{ text: params.user }],
+    responseSchema: params.responseSchema,
+    temperature: params.temperature,
+  });
 }

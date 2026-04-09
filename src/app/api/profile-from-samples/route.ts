@@ -1,6 +1,19 @@
 import { NextResponse } from "next/server";
-import { chatProfileFromPdfsAndText } from "@/lib/gemini";
-import { PHASE1_DRAFT_FROM_SOURCES_SYSTEM } from "@/lib/voice-pipeline-prompts";
+import {
+  chatCompletionJson,
+  generateStructuredFromParts,
+  type GeminiPart,
+} from "@/lib/gemini";
+import {
+  EVIDENCE_RESPONSE_SCHEMA,
+  VOICE_SPEC_RESPONSE_SCHEMA,
+} from "@/lib/gemini-json-schemas";
+import { renderVoiceSpecMarkdown } from "@/lib/render-voice-spec-markdown";
+import type { EvidenceJson, SourceManifestEntry, VoiceSpecJson } from "@/lib/voice-types";
+import {
+  EXTRACT_EVIDENCE_SYSTEM,
+  SYNTHESIZE_VOICE_SPEC_SYSTEM,
+} from "@/lib/voice-pipeline-prompts";
 
 export const maxDuration = 120;
 
@@ -62,6 +75,80 @@ function isPdfFile(f: File): boolean {
   return f.type === "application/pdf" || n.endsWith(".pdf");
 }
 
+function buildManifestAndParts(params: {
+  tweetArchives: { name: string; text: string }[];
+  samples: string[];
+  pdfs: { name: string; dataBase64: string; bytes: number }[];
+}): { manifest: SourceManifestEntry[]; userParts: GeminiPart[] } {
+  const manifest: SourceManifestEntry[] = [];
+  const head: string[] = [];
+
+  head.push(`<context>\n<source_manifest>\n`);
+
+  for (let i = 0; i < params.tweetArchives.length; i++) {
+    const sourceId = `tweet-${i}`;
+    manifest.push({
+      sourceId,
+      type: "tweet_archive",
+      label: params.tweetArchives[i].name,
+    });
+  }
+  for (let j = 0; j < params.samples.length; j++) {
+    const sourceId = `paste-${j}`;
+    manifest.push({
+      sourceId,
+      type: "pasted_text",
+      label: `paste-${j + 1}`,
+    });
+  }
+  for (let k = 0; k < params.pdfs.length; k++) {
+    const sourceId = `pdf-${k}`;
+    manifest.push({
+      sourceId,
+      type: "pdf",
+      label: params.pdfs[k].name,
+    });
+  }
+
+  head.push(JSON.stringify(manifest, null, 2));
+  head.push(`\n</source_manifest>\n\n<source_content>\n`);
+
+  for (let t = 0; t < params.tweetArchives.length; t++) {
+    const id = `tweet-${t}`;
+    head.push(
+      `[source id="${id}" type="tweet_archive"]\n${params.tweetArchives[t].text}\n[/source]\n\n`,
+    );
+  }
+  for (let p = 0; p < params.samples.length; p++) {
+    const id = `paste-${p}`;
+    head.push(
+      `[source id="${id}" type="pasted_text"]\n${params.samples[p]}\n[/source]\n\n`,
+    );
+  }
+
+  const userParts: GeminiPart[] = [{ text: head.join("") }];
+
+  for (let k = 0; k < params.pdfs.length; k++) {
+    const id = `pdf-${k}`;
+    userParts.push({
+      text: `[source id="${id}" type="pdf"]\nFile: ${params.pdfs[k].name}\n`,
+    });
+    userParts.push({
+      inline_data: {
+        mime_type: "application/pdf",
+        data: params.pdfs[k].dataBase64,
+      },
+    });
+    userParts.push({ text: `[/source]\n\n` });
+  }
+
+  userParts.push({
+    text: `</source_content>\n\n<task>\nBased on the entire source set above, extract only evidence-backed voice patterns.\n</task>\n\n<final_constraints>\nUse only the provided material. Perform logical deductions from the provided material when justified. Do not introduce outside knowledge. If a trait is unsupported, mark it as uncertain. Return JSON only.\n</final_constraints>`,
+  });
+
+  return { manifest, userParts };
+}
+
 export async function POST(req: Request) {
   try {
     const ct = req.headers.get("content-type") ?? "";
@@ -112,52 +199,29 @@ export async function POST(req: Request) {
       });
     }
 
-    const tweetBlock =
-      tweetArchives.length > 0
-        ? tweetArchives
-            .map((a) => `## Tweet archive: ${a.name}\n\n${a.text}`)
-            .join("\n\n---\n\n")
-        : "";
-
-    const pastedBlock =
-      samples.length > 0
-        ? samples
-            .map((s, i) => `## Pasted excerpt ${i + 1}\n\n${s}`)
-            .join("\n\n---\n\n")
-        : "";
-
-    const intro = `You are given one or more PDFs of the author's writing, plus optional tweet-export text and pasted excerpts below. Read them for voice, cadence, and style — not to quote verbatim. Tweet archives skew short-form; PDFs often skew long-form — use both for a spec that covers different lengths.
-
-Source material:
-${tweetBlock ? `${tweetBlock}\n\n---\n\n` : ""}${pastedBlock ? `${pastedBlock}\n\n---\n\n` : ""}`;
-
-    const userParts: Array<
-      | { text: string }
-      | { inline_data: { mime_type: string; data: string } }
-    > = [{ text: intro }];
-
-    for (let i = 0; i < pdfs.length; i++) {
-      const p = pdfs[i];
-      userParts.push({
-        text: `--- PDF ${i + 1}: ${p.name} ---`,
-      });
-      userParts.push({
-        inline_data: {
-          mime_type: "application/pdf",
-          data: p.dataBase64,
-        },
-      });
-    }
-
-    userParts.push({
-      text: `Reply with ONLY the Markdown voice spec for phase 1 (see system instruction). No JSON. No preamble — start with the first heading or paragraph.`,
+    const { manifest, userParts } = buildManifestAndParts({
+      tweetArchives,
+      samples,
+      pdfs,
     });
 
-    const document = await chatProfileFromPdfsAndText({
-      system: PHASE1_DRAFT_FROM_SOURCES_SYSTEM,
+    const evidenceJson = await generateStructuredFromParts<EvidenceJson>({
+      system: EXTRACT_EVIDENCE_SYSTEM,
       userParts,
+      responseSchema: EVIDENCE_RESPONSE_SCHEMA,
+      temperature: 0.2,
+    });
+
+    const synthesizeUser = `<context>\n<evidence_json>\n${JSON.stringify(evidenceJson)}\n</evidence_json>\n</context>\n\n<task>\nTurn this evidence into a reusable voice spec.\n</task>\n\n<final_constraints>\nBase every stable rule on repeated evidence.\nIf a trait is weakly supported, place it under optional variation or uncertainty.\nReturn JSON only.\n</final_constraints>`;
+
+    const specJson = await chatCompletionJson<VoiceSpecJson>({
+      system: SYNTHESIZE_VOICE_SPEC_SYSTEM,
+      user: synthesizeUser,
+      responseSchema: VOICE_SPEC_RESPONSE_SCHEMA,
       temperature: 0.35,
     });
+
+    const document = renderVoiceSpecMarkdown(specJson);
 
     if (!document.trim()) {
       return NextResponse.json(
@@ -171,6 +235,9 @@ ${tweetBlock ? `${tweetBlock}\n\n---\n\n` : ""}${pastedBlock ? `${pastedBlock}\n
 
     return NextResponse.json({
       document: document.trim(),
+      specJson,
+      evidenceJson,
+      manifest,
       sources: [
         ...tweetArchives.map((t) => ({
           name: t.name,

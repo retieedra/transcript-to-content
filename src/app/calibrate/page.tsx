@@ -5,13 +5,15 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ManifestoHeader } from "@/components/ManifestoHeader";
 import { StepDots } from "@/components/StepDots";
-import { withBasePath } from "@/lib/appPath";
 import {
   loadCalibration,
   loadProfileDraft,
   saveCalibration,
   saveFinalDocument,
+  type ProfileDraftBundle,
 } from "@/lib/profile-storage";
+import { withBasePath } from "@/lib/appPath";
+import type { CalibrationItem } from "@/lib/voice-types";
 
 function ThumbUpIcon({ className }: { className?: string }) {
   return (
@@ -49,10 +51,19 @@ function ThumbDownIcon({ className }: { className?: string }) {
   );
 }
 
+function linesToItems(lines: string[]): CalibrationItem[] {
+  return lines.map((text) => ({
+    text,
+    bucket: "on_target_easy",
+    tests: [],
+    length: "medium" as const,
+  }));
+}
+
 export default function CalibratePage() {
   const router = useRouter();
-  const [profile, setProfile] = useState<string | null>(null);
-  const [examples, setExamples] = useState<string[]>([]);
+  const [bundle, setBundle] = useState<ProfileDraftBundle | null>(null);
+  const [items, setItems] = useState<CalibrationItem[]>([]);
   const [ratings, setRatings] = useState<Array<boolean | null>>([]);
   const [loadBusy, setLoadBusy] = useState(true);
   const [submitBusy, setSubmitBusy] = useState(false);
@@ -61,19 +72,19 @@ export default function CalibratePage() {
 
   useEffect(() => {
     const draft = loadProfileDraft();
-    if (!draft) {
+    if (!draft || typeof draft === "string" || !draft.specJson) {
       router.replace("/");
       return;
     }
-    setProfile(draft);
+    setBundle(draft);
 
     const cached = loadCalibration();
     if (
       cached &&
-      cached.examples.length > 0 &&
-      cached.ratings.length === cached.examples.length
+      cached.items.length > 0 &&
+      cached.ratings.length === cached.items.length
     ) {
-      setExamples(cached.examples);
+      setItems(cached.items);
       setRatings(cached.ratings);
       setLoadBusy(false);
       return;
@@ -87,17 +98,22 @@ export default function CalibratePage() {
         const res = await fetch(withBasePath("/api/generate-examples"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ profile: draft, count: 10 }),
+          body: JSON.stringify({ specJson: draft.specJson, count: 10 }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? res.statusText);
-        const lines = Array.isArray(data.lines) ? data.lines : [];
-        if (!lines.length) throw new Error("No lines returned.");
+        let nextItems: CalibrationItem[] = [];
+        if (Array.isArray(data.items)) {
+          nextItems = data.items as CalibrationItem[];
+        } else if (Array.isArray(data.lines)) {
+          nextItems = linesToItems(data.lines as string[]);
+        }
+        if (!nextItems.length) throw new Error("No lines returned.");
         if (cancelled) return;
-        const nextRatings = lines.map(() => null as boolean | null);
-        setExamples(lines);
+        const nextRatings = nextItems.map(() => null as boolean | null);
+        setItems(nextItems);
         setRatings(nextRatings);
-        saveCalibration({ examples: lines, ratings: nextRatings });
+        saveCalibration({ items: nextItems, ratings: nextRatings });
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : "Failed to load lines");
@@ -117,30 +133,37 @@ export default function CalibratePage() {
       setRatings((r) => {
         const next = [...r];
         next[index] = value;
-        if (examples.length) {
-          saveCalibration({ examples, ratings: next });
+        if (items.length) {
+          saveCalibration({ items, ratings: next });
         }
         return next;
       });
     },
-    [examples],
+    [items],
   );
 
   const allRated = ratings.length > 0 && ratings.every((x) => x !== null);
 
   const finish = async () => {
-    if (!profile || !allRated) return;
+    if (!bundle || !allRated) return;
     setSubmitBusy(true);
     setFinishError(null);
     try {
-      const items = examples.map((text, i) => ({
-        text,
+      const ratedItems = items.map((item, i) => ({
+        text: item.text,
         approved: ratings[i] === true,
+        bucket: item.bucket,
+        tests: item.tests,
+        length: item.length,
       }));
       const res = await fetch(withBasePath("/api/refine-profile"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile, items }),
+        body: JSON.stringify({
+          specJson: bundle.specJson,
+          profile: bundle.document,
+          items: ratedItems,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? res.statusText);
@@ -156,24 +179,29 @@ export default function CalibratePage() {
   };
 
   const retryFetch = async () => {
-    const p = profile ?? loadProfileDraft();
-    if (!p) return;
+    const b = bundle ?? (loadProfileDraft() as ProfileDraftBundle | null);
+    if (!b || typeof b === "string" || !b.specJson) return;
     setLoadBusy(true);
     setLoadError(null);
     try {
       const res = await fetch(withBasePath("/api/generate-examples"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: p, count: 10 }),
+        body: JSON.stringify({ specJson: b.specJson, count: 10 }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? res.statusText);
-      const lines = Array.isArray(data.lines) ? data.lines : [];
-      if (!lines.length) throw new Error("No lines returned.");
-      const nextRatings = lines.map(() => null as boolean | null);
-      setExamples(lines);
+      let nextItems: CalibrationItem[] = [];
+      if (Array.isArray(data.items)) {
+        nextItems = data.items as CalibrationItem[];
+      } else if (Array.isArray(data.lines)) {
+        nextItems = linesToItems(data.lines as string[]);
+      }
+      if (!nextItems.length) throw new Error("No lines returned.");
+      const nextRatings = nextItems.map(() => null as boolean | null);
+      setItems(nextItems);
       setRatings(nextRatings);
-      saveCalibration({ examples: lines, ratings: nextRatings });
+      saveCalibration({ items: nextItems, ratings: nextRatings });
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load lines");
     } finally {
@@ -219,15 +247,15 @@ export default function CalibratePage() {
           </div>
         ) : null}
 
-        {!loadBusy && examples.length > 0 ? (
+        {!loadBusy && items.length > 0 ? (
           <ul className="mt-12 space-y-4">
-            {examples.map((line, i) => (
+            {items.map((item, i) => (
               <li
                 key={i}
                 className="border border-[var(--rule)] bg-[var(--paper)] p-4"
               >
                 <p className="text-[0.9375rem] leading-relaxed text-[var(--ink)]">
-                  {line}
+                  {item.text}
                 </p>
                 <div className="mt-4 flex justify-center gap-4">
                   <button
@@ -262,7 +290,7 @@ export default function CalibratePage() {
           </ul>
         ) : null}
 
-        {!loadBusy && examples.length > 0 ? (
+        {!loadBusy && items.length > 0 ? (
           <div className="mt-12">
             {finishError && allRated ? (
               <p className="mb-3 text-center text-sm text-red-800/90">

@@ -6,6 +6,7 @@ import { ManifestoHeader } from "@/components/ManifestoHeader";
 import { SpinningManifold } from "@/components/SpinningManifold";
 import { StepDots } from "@/components/StepDots";
 import { saveProfileDraft } from "@/lib/profile-storage";
+import type { EvidenceJson, VoiceSpecJson } from "@/lib/voice-types";
 import { withBasePath } from "@/lib/appPath";
 
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
@@ -137,11 +138,18 @@ export default function Home() {
       }
       setSources(null);
       const doc = typeof data.document === "string" ? data.document : "";
-      if (!doc) {
-        setError("Empty response.");
+      const specJson = data.specJson;
+      if (!doc || !specJson || typeof specJson !== "object") {
+        setError("Empty or invalid response.");
         return;
       }
-      saveProfileDraft(doc);
+      const ev = data.evidenceJson;
+      saveProfileDraft({
+        document: doc,
+        specJson: specJson as VoiceSpecJson,
+        evidenceJson:
+          ev && typeof ev === "object" ? (ev as EvidenceJson) : undefined,
+      });
       router.push("/calibrate");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Request failed");
