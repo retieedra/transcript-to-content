@@ -25,7 +25,7 @@ export default function ExportPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "voice.md";
+    a.download = "soul.md";
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -48,8 +48,9 @@ export default function ExportPage() {
       <main className="mx-auto max-w-2xl px-5 py-14 sm:px-8 sm:py-16">
         <StepDots active={2} />
         <ManifestoHeader
-          title="Here is your file"
-          subtitle="Keep it on disk, in git, or wherever you already store notes. It is just text—no vendor, no workflow prescribed."
+          eyebrow="Your voice, one file"
+          title="Here is soul.md"
+          subtitle="Get your soul.md everywhere: keep it on disk, in git, or wherever you store notes. Paste it into custom instructions, Cursor rules, or any assistant—same voice for posts, essays, and whatever else you write, one file."
         />
 
         <div className="mt-10 flex flex-wrap justify-center gap-3">

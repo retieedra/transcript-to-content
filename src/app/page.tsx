@@ -8,12 +8,25 @@ import { StepDots } from "@/components/StepDots";
 import { saveProfileDraft } from "@/lib/profile-storage";
 import { withBasePath } from "@/lib/appPath";
 
-type SourceRow = { url: string; ok: boolean; chars?: number; error?: string };
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
+const MAX_PDFS = 10;
+const TWEET_ARCHIVE_MAX = 4 * 1024 * 1024;
+const MAX_TWEET_FILES = 10;
+
+type TweetArchive = { name: string; text: string };
+
+type SourceRow = {
+  name: string;
+  ok: boolean;
+  bytes?: number;
+  error?: string;
+};
 
 export default function Home() {
   const router = useRouter();
-  const [urlsText, setUrlsText] = useState("");
   const [chunks, setChunks] = useState<string[]>([""]);
+  const [pdfFiles, setPdfFiles] = useState<File[]>([]);
+  const [tweetArchives, setTweetArchives] = useState<TweetArchive[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceRow[] | null>(null);
@@ -30,40 +43,76 @@ export default function Home() {
     setChunks((c) => (c.length <= 1 ? c : c.filter((_, j) => j !== i)));
   }, []);
 
-  const onFiles = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const removePdf = useCallback((i: number) => {
+    setPdfFiles((f) => f.filter((_, j) => j !== i));
+  }, []);
+
+  const removeTweetArchive = useCallback((i: number) => {
+    setTweetArchives((a) => a.filter((_, j) => j !== i));
+  }, []);
+
+  const onTweetArchives = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const { files } = e.target;
+      if (!files?.length) return;
+      const next: TweetArchive[] = [];
+      for (const f of files) {
+        if (f.size > TWEET_ARCHIVE_MAX) continue;
+        const t = await f.text();
+        if (t.trim()) next.push({ name: f.name, text: t.trim() });
+      }
+      if (next.length) {
+        setTweetArchives((prev) => {
+          const merged = [...prev, ...next];
+          return merged.slice(0, MAX_TWEET_FILES);
+        });
+      }
+      e.target.value = "";
+    },
+    [],
+  );
+
+  const onPdfInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const { files } = e.target;
     if (!files?.length) return;
-    const parts: string[] = [];
+    const next: File[] = [];
     for (const f of files) {
-      if (f.size > 512 * 1024) continue;
-      const t = await f.text();
-      if (t.trim()) parts.push(t.trim());
+      if (f.size > MAX_PDF_BYTES) continue;
+      const lower = f.name.toLowerCase();
+      if (f.type !== "application/pdf" && !lower.endsWith(".pdf")) continue;
+      next.push(f);
     }
-    if (parts.length) setChunks((c) => [...c.filter(Boolean), ...parts, ""]);
+    if (next.length) {
+      setPdfFiles((prev) => {
+        const merged = [...prev, ...next];
+        return merged.slice(0, MAX_PDFS);
+      });
+    }
     e.target.value = "";
   }, []);
 
   const submit = async () => {
     setError(null);
     setSources(null);
-    const urls = urlsText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    const samples = chunks.map((s) => s.trim()).filter(Boolean);
+    const pasteBlocks = chunks.map((s) => s.trim()).filter(Boolean);
 
-    if (urls.length === 0 && samples.length === 0) {
-      setError(
-        "Add at least one link, or paste text in the optional box below.",
-      );
+    if (pdfFiles.length === 0) {
+      setError("Upload at least one PDF.");
       return;
     }
+
+    const form = new FormData();
+    form.append("samples", JSON.stringify(pasteBlocks));
+    form.append("tweetArchives", JSON.stringify(tweetArchives));
+    for (const f of pdfFiles) {
+      form.append("pdf", f);
+    }
+
     setBusy(true);
     try {
       const res = await fetch(withBasePath("/api/profile-from-samples"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls, samples }),
+        body: form,
       });
       let data: Record<string, unknown> = {};
       const raw = await res.text();
@@ -71,7 +120,7 @@ export default function Home() {
         data = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
       } catch {
         setError(
-          `Server returned HTTP ${res.status} with a non-JSON body. Is the dev server running?`,
+          "Something went wrong with the response. Try again in a moment.",
         );
         return;
       }
@@ -107,8 +156,9 @@ export default function Home() {
         <StepDots active={0} />
         <ManifestoHeader
           graphic={<SpinningManifold />}
+          eyebrow="Get your soul.md everywhere"
           title="Your voice, one file"
-          subtitle="Paste public links to things you have already published. We pull the visible text, draft a tight spec, you finetune with thumbs up or down on sample lines, then you get one file—plain text you own."
+          subtitle="Upload PDFs of your writing—short or long, mixed is good. We turn that into a spec with options for different kinds of content, you finetune with a few ratings, then you download soul.md to reuse anywhere."
         />
 
         <aside className="mt-10 border border-[var(--rule)] bg-[var(--paper-2)] p-4 text-left text-[0.8125rem] leading-relaxed text-[var(--ink-muted)]">
@@ -116,54 +166,169 @@ export default function Home() {
             What you walk away with
           </p>
           <ul className="mt-2 list-inside list-disc space-y-1">
-            <li>A first-pass spec from your links (and any paste).</li>
-            <li>A finetune step: sample lines with thumbs up or down.</li>
-            <li>One file you can file, edit, or feed to any tool on your terms.</li>
+            <li>
+              A voice spec with options for short- and long-form (and more), in
+              one file.
+            </li>
+            <li>
+              A finetune pass: mixed sample lines, thumbs up or down.
+            </li>
+            <li>
+              soul.md: one file, your voice, paste it into chats and IDEs
+              wherever you write.
+            </li>
           </ul>
         </aside>
 
-        <section className="mt-10 space-y-3 border border-[var(--rule)] bg-[var(--paper)] p-5 sm:p-6">
+        <section className="mt-10 space-y-4 border border-[var(--rule)] bg-[var(--paper)] p-5 sm:p-6">
           <h2 className="font-doc-mono text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--ink)]">
-            Step 1 · Links
+            What to include
           </h2>
-          <p className="text-[0.9375rem] leading-relaxed text-[var(--ink-muted)]">
-            Put one URL per line: profile pages, pinned posts, blog indexes,
-            newsletter archives—anything that is <strong>public</strong> and
-            opens without signing in. We fetch the text from each page. Many
-            sites allow that; X (Twitter) often does not—if a link fails, paste
-            excerpts in step 2 instead.
+          <p className="text-[0.875rem] leading-relaxed text-[var(--ink-muted)]">
+            The exported spec is meant for{" "}
+            <strong className="font-medium text-[var(--ink)]">all kinds of</strong>{" "}
+            content: short posts and long pieces, not only one mode. Mix sources
+            so the model sees how you sound in different lengths.
           </p>
-          <textarea
-            className="type-input min-h-[120px] w-full resize-y border border-[var(--rule)] bg-[var(--paper)] px-3 py-2.5 text-[0.875rem] leading-relaxed text-[var(--ink)] outline-none ring-0 focus:border-[var(--rule-strong)]"
-            placeholder={"https://\nhttps://"}
-            value={urlsText}
-            onChange={(e) => setUrlsText(e.target.value)}
-            spellCheck={false}
-          />
+          <ul className="space-y-2 text-[0.875rem] leading-relaxed text-[var(--ink-muted)]">
+            <li>
+              <span className="text-[var(--ink)]">Helpful:</span> original
+              writing in more than one register (e.g. tight blurbs and slower
+              essays), recent polished work, your own words rather than mostly
+              quotes or reposts.
+            </li>
+            <li>
+              <span className="text-[var(--ink)]">Thin on their own:</span> only
+              generic one-liners, or PDFs that are mostly other people’s text
+              with little of you.
+            </li>
+          </ul>
+          <p className="border-t border-[var(--rule)] pt-4 text-[0.875rem] leading-relaxed text-[var(--ink-muted)]">
+            Export or save work as PDF when you can: articles, reports, talks,
+            newsletters, essays, threads turned into PDFs, interviews. Scanned
+            PDFs may work if the text is clear; native text PDFs work best.
+          </p>
         </section>
 
-        <section className="mt-6 space-y-3 border border-[var(--rule)] bg-[var(--paper)] p-5 sm:p-6">
+        <section className="mt-6 space-y-3 border-2 border-dashed border-[var(--rule-strong)] bg-[var(--paper-2)] p-5 sm:p-6">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
             <div>
               <h2 className="font-doc-mono text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--ink)]">
-                Step 2 · Optional paste
+                PDFs
               </h2>
               <p className="mt-2 text-[0.9375rem] leading-relaxed text-[var(--ink-muted)]">
-                If a site blocked the fetch, or you want more material, paste
-                drafts, emails, or notes here. Plain text or Markdown is fine.
+                Upload one or more PDFs (up to {MAX_PDFS} files,{" "}
+                {MAX_PDF_BYTES / 1024 / 1024} MB each). This is the only required
+                input.
               </p>
             </div>
-            <label className="shrink-0 cursor-pointer border border-[var(--rule)] bg-[var(--paper-2)] px-3 py-2 text-center font-doc-mono text-[11px] uppercase tracking-wider text-[var(--ink)] hover:border-[var(--rule-strong)]">
-              Upload .txt / .md
+            <label className="shrink-0 cursor-pointer border border-[var(--ink)] bg-[var(--paper)] px-3 py-2.5 text-center font-doc-mono text-[11px] uppercase tracking-wider text-[var(--ink)] hover:bg-[var(--paper-2)]">
+              Choose PDFs
               <input
                 type="file"
-                accept=".txt,.text,.md,.markdown"
+                accept="application/pdf,.pdf"
                 multiple
                 className="sr-only"
-                onChange={(e) => void onFiles(e)}
+                onChange={(e) => void onPdfInput(e)}
               />
             </label>
           </div>
+          {pdfFiles.length > 0 ? (
+            <ul className="space-y-1 font-doc-mono text-[11px] text-[var(--ink-muted)]">
+              {pdfFiles.map((f, i) => (
+                <li
+                  key={`${f.name}-${i}`}
+                  className="flex items-center justify-between gap-2 border border-[var(--rule)] bg-[var(--paper)] px-2 py-1.5"
+                >
+                  <span className="truncate text-[var(--ink)]">{f.name}</span>
+                  <span className="shrink-0 text-[var(--ink-muted)]">
+                    {(f.size / 1024).toFixed(1)} KB
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removePdf(i)}
+                    className="shrink-0 uppercase tracking-wider hover:text-[var(--ink)]"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+
+        <section className="mt-6 space-y-3 border-2 border-dashed border-[var(--rule-strong)] bg-[var(--paper-2)] p-5 sm:p-6">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+            <div>
+              <h2 className="font-doc-mono text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--ink)]">
+                Tweet export
+              </h2>
+              <p className="mt-2 text-[0.9375rem] leading-relaxed text-[var(--ink-muted)]">
+                Separate upload for X posts: bring an export or converted file (
+                <span className="font-doc-mono text-[0.8125rem]">.txt</span>,{" "}
+                <span className="font-doc-mono text-[0.8125rem]">.csv</span>,{" "}
+                <span className="font-doc-mono text-[0.8125rem]">.json</span>,
+                etc.). Official path:{" "}
+                <strong className="font-medium text-[var(--ink)]">
+                  Settings and privacy
+                </strong>{" "}
+                →{" "}
+                <strong className="font-medium text-[var(--ink)]">
+                  Your account
+                </strong>{" "}
+                →{" "}
+                <strong className="font-medium text-[var(--ink)]">
+                  Download an archive of your data
+                </strong>
+                , then pull post text from the ZIP if needed. Up to{" "}
+                {TWEET_ARCHIVE_MAX / 1024 / 1024} MB per file,{" "}
+                {MAX_TWEET_FILES} files. Optional but great for short-form
+                signal alongside PDFs.
+              </p>
+            </div>
+            <label className="shrink-0 cursor-pointer border border-[var(--ink)] bg-[var(--paper)] px-3 py-2.5 text-center font-doc-mono text-[11px] uppercase tracking-wider text-[var(--ink)] hover:bg-[var(--paper-2)]">
+              Choose files
+              <input
+                type="file"
+                accept=".txt,.text,.csv,.json,.js,.html,.md,.markdown"
+                multiple
+                className="sr-only"
+                onChange={(e) => void onTweetArchives(e)}
+              />
+            </label>
+          </div>
+          {tweetArchives.length > 0 ? (
+            <ul className="space-y-1 font-doc-mono text-[11px] text-[var(--ink-muted)]">
+              {tweetArchives.map((a, i) => (
+                <li
+                  key={`${a.name}-${i}`}
+                  className="flex items-center justify-between gap-2 border border-[var(--rule)] bg-[var(--paper)] px-2 py-1.5"
+                >
+                  <span className="truncate text-[var(--ink)]">{a.name}</span>
+                  <span className="shrink-0 text-[var(--ink-muted)]">
+                    {a.text.length.toLocaleString()} chars
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeTweetArchive(i)}
+                    className="shrink-0 uppercase tracking-wider hover:text-[var(--ink)]"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+
+        <section className="mt-6 space-y-3 border border-[var(--rule)] bg-[var(--paper)] p-5 sm:p-6">
+          <h2 className="font-doc-mono text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--ink)]">
+            Optional: paste extra excerpts
+          </h2>
+          <p className="text-[0.9375rem] leading-relaxed text-[var(--ink-muted)]">
+            Plain text or Markdown snippets that are not in the PDFs, or a
+            short passage you want weighted alongside the uploads.
+          </p>
 
           <div className="space-y-3">
             {chunks.map((text, i) => (
@@ -186,7 +351,7 @@ export default function Home() {
                   value={text}
                   onChange={(e) => setChunk(i, e.target.value)}
                   rows={5}
-                  placeholder="Paste here…"
+                  placeholder="Optional…"
                   className="type-input w-full resize-y border border-[var(--rule)] bg-[var(--paper)] px-3 py-2.5 text-[0.875rem] leading-relaxed text-[var(--ink)] outline-none focus:border-[var(--rule-strong)]"
                   spellCheck
                 />
@@ -205,10 +370,12 @@ export default function Home() {
 
         {sources?.length ? (
           <ul className="mt-6 space-y-1 font-doc-mono text-[11px] text-[var(--ink-muted)]">
-            {sources.map((s) => (
-              <li key={s.url}>
-                {s.ok ? "ok" : "fail"} · {s.url}
-                {s.chars != null && s.ok ? ` · ${s.chars} chars` : ""}
+            {sources.map((s, i) => (
+              <li key={`${s.name}-${i}`}>
+                {s.ok ? "ok" : "fail"} · {s.name}
+                {s.bytes != null && s.ok
+                  ? ` · ${s.bytes.toLocaleString()} bytes`
+                  : ""}
                 {!s.ok && s.error ? ` — ${s.error}` : ""}
               </li>
             ))}

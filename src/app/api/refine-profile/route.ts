@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { chatCompletionPlainText } from "@/lib/openai";
+import { chatCompletionPlainText } from "@/lib/gemini";
+import { PHASE3_REFINE_FROM_RATINGS_SYSTEM } from "@/lib/voice-pipeline-prompts";
 
 type Item = { text: string; approved: boolean };
 
@@ -48,13 +49,15 @@ export async function POST(req: Request) {
     const liked = items.filter((i) => i.approved).map((i) => i.text);
     const disliked = items.filter((i) => !i.approved).map((i) => i.text);
 
+    const noApprovalsNote =
+      liked.length === 0
+        ? "\n(No thumbs-up lines — lean away from rejected patterns and keep the draft structure unless a rejection clearly contradicts it.)\n"
+        : "";
+
     const document = await chatCompletionPlainText({
-      system: `You revise a Markdown specification using the user's feedback on sample lines.
-Same purpose: instructions for another model drafting in this style.
-Strengthen patterns from approved lines; down-weight patterns from rejected lines.
-Keep ## / ### structure. No meta commentary.`,
-      user: `Current specification:\n${profile}\n\n---\nApproved sample lines:\n${liked.map((t, i) => `${i + 1}. ${t}`).join("\n") || "(none)"}\n\n---\nRejected sample lines:\n${disliked.map((t, i) => `${i + 1}. ${t}`).join("\n") || "(none)"}\n\n---\nReply with ONLY the full revised Markdown. No JSON. No preamble.`,
-      temperature: 0.4,
+      system: PHASE3_REFINE_FROM_RATINGS_SYSTEM,
+      user: `## Current specification (Markdown)\n${profile}\n\n---\n## Thumbs-up (primary — align the spec to these)${noApprovalsNote}\n${liked.map((t, i) => `${i + 1}. ${t}`).join("\n") || "(none)"}\n\n---\n## Thumbs-down (avoid or soften these moves)\n${disliked.map((t, i) => `${i + 1}. ${t}`).join("\n") || "(none)"}\n\n---\nReply with ONLY the full revised Markdown. No JSON. No preamble.`,
+      temperature: liked.length > 0 ? 0.35 : 0.3,
     });
 
     if (!document.trim()) {

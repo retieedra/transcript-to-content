@@ -1,14 +1,23 @@
 import { NextResponse } from "next/server";
-import { chatCompletionPlainText } from "@/lib/openai";
+import { chatCompletionPlainText } from "@/lib/gemini";
+import { phase2CalibrationSamplesSystem } from "@/lib/voice-pipeline-prompts";
 
 function splitIntoLines(text: string, want: number): string[] {
-  let parts = text
-    .split(/\n\n+/)
+  const byRule = text
+    .split(/\n---+\s*\n/)
     .map((p) => p.trim())
     .filter(Boolean);
+  let parts = byRule.length >= 2 ? byRule : [];
+
   if (parts.length < 2) {
     parts = text
-      .split("\n")
+      .split(/\n\n+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+  }
+  if (parts.length < 2) {
+    parts = text
+      .split(/\n/)
       .map((l) => l.trim())
       .filter((l) => l.length > 0 && !/^(line|sample)\s*\d+/i.test(l));
   }
@@ -37,9 +46,8 @@ export async function POST(req: Request) {
     }
 
     const text = await chatCompletionPlainText({
-      system: `You write short standalone passages for a style test (one to three sentences each, or one social-length line). Neutral topics are fine.
-Reply with exactly ${count} passages. Put one blank line between each passage. No numbering, no bullets, no introduction.`,
-      user: `Specification (Markdown):\n${profile}`,
+      system: phase2CalibrationSamplesSystem(count),
+      user: `Draft voice specification (your samples must follow this; do not contradict it):\n\n${profile}`,
       temperature: 0.85,
     });
 

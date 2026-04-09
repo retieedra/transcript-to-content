@@ -17,7 +17,7 @@ const mono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Your voice, one file",
   description:
-    "Pull text from public links, judge a few sample lines, export one file.",
+    "Get your soul.md everywhere. Collect public writing, finetune with a few ratings, export one markdown file: your voice, one file—use it in chats, IDEs, and notes.",
 };
 
 export default function RootLayout({

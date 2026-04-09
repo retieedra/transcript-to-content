@@ -81,7 +81,7 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
       url,
       markdown: "",
       error:
-        "We couldn’t load this page. Try a different public link, or paste your writing in Step 2.",
+        "We couldn’t load this page. Try a different public link, or paste or upload your writing instead.",
     };
   }
 
@@ -108,7 +108,7 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
     return {
       url,
       markdown: "",
-      error: `We couldn’t reach the page service (${msg}). Try again, or paste your text in Step 2.`,
+      error: `We couldn’t reach the page service (${msg}). Try again, or paste or upload your text instead.`,
     };
   }
 
@@ -124,7 +124,7 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
         url,
         markdown: "",
         error:
-          "Something went wrong loading this link. Try another URL or paste the text in Step 2.",
+          "Something went wrong loading this link. Try another URL or paste or upload the text instead.",
       };
     }
   }
@@ -143,7 +143,7 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
         url,
         markdown: "",
         error:
-          "This link couldn’t be accessed. Try another public page or paste your writing in Step 2.",
+          "This link couldn’t be accessed. Try another public page or paste or upload your writing instead.",
       };
     }
     if (res.status === 402) {
@@ -151,7 +151,7 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
         url,
         markdown: "",
         error:
-          "The page service declined this request (quota or billing). Try again later or paste your text in Step 2.",
+          "The page service declined this request (quota or billing). Try again later or paste or upload your text instead.",
       };
     }
     if (res.status === 429) {
@@ -159,14 +159,14 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
         url,
         markdown: "",
         error:
-          "Too many requests right now. Wait a bit, try fewer links, or paste your text in Step 2.",
+          "Too many requests right now. Wait a bit, try fewer links, or paste or upload your text instead.",
       };
     }
     if (res.status >= 400 && res.status < 500) {
       return {
         url,
         markdown: "",
-        error: `${err} — try another link or paste an excerpt in Step 2.`,
+        error: `${err} — try another link or paste or upload an excerpt instead.`,
       };
     }
     return {
@@ -181,7 +181,7 @@ export async function scrapeMarkdown(url: string): Promise<ScrapeResult> {
       url,
       markdown: "",
       error:
-        "No readable text from this page. Try a different link or paste an excerpt in Step 2.",
+        "No readable text from this page. Try a different link or paste or upload an excerpt instead.",
     };
   }
 

@@ -186,8 +186,9 @@ export default function CalibratePage() {
       <main className="mx-auto max-w-2xl px-5 py-14 sm:px-8 sm:py-16">
         <StepDots active={1} />
         <ManifestoHeader
+          eyebrow="Your voice, one file"
           title="Finetune"
-          subtitle="Read each line on its own. Thumb up if it could be yours, thumb down if it misses. That feedback rewrites the spec before you download."
+          subtitle="You’ll see a mix of short and longer samples. Read each on its own. Thumb up if it could be yours, thumb down if it misses. That feedback rewrites the spec before you get soul.md—so the file you export matches you across posts, essays, and everything in between."
         />
 
         <p className="mt-8 text-center font-doc-mono text-[11px] text-[var(--ink-muted)]">
