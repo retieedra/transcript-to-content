@@ -1,3 +1,6 @@
+/** Default when `GEMINI_MODEL` is unset. Prefer a current model; older IDs may be unavailable to new API keys. */
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+
 function stripFence(s: string): string {
   let t = s.trim();
   if (t.startsWith("```")) {
@@ -39,7 +42,7 @@ export async function chatCompletionPlainText(params: {
     );
   }
 
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, {
@@ -148,7 +151,7 @@ export async function generateStructuredFromParts<T>(params: StructuredParams): 
     );
   }
 
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, {
